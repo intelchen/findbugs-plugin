@@ -1,9 +1,9 @@
 package hudson.plugins.findbugs;
 
 import hudson.model.AbstractBuild;
-import hudson.plugins.analysis.core.AbstractResultAction;
 import hudson.plugins.analysis.core.HealthDescriptor;
 import hudson.plugins.analysis.core.PluginDescriptor;
+import hudson.plugins.analysis.core.AbstractResultAction;
 
 /**
  * Controls the live cycle of the FindBugs results. This action persists the
@@ -31,38 +31,13 @@ public class FindBugsResultAction extends AbstractResultAction<FindBugsResult> {
         super(owner, new FindBugsHealthDescriptor(healthDescriptor), result);
     }
 
-    /**
-     * Creates a new instance of <code>FindBugsBuildAction</code>.
-     *
-     * @param owner
-     *            the associated build of this action
-     * @param healthDescriptor
-     *            health descriptor to use
-     */
-    public FindBugsResultAction(final AbstractBuild<?, ?> owner, final HealthDescriptor healthDescriptor) {
-        super(owner, new FindBugsHealthDescriptor(healthDescriptor));
-    }
-
     /** {@inheritDoc} */
     public String getDisplayName() {
         return Messages.FindBugs_ProjectAction_Name();
     }
 
-    /** {@inheritDoc} */
     @Override
     protected PluginDescriptor getDescriptor() {
         return new FindBugsDescriptor();
-    }
-
-    /** {@inheritDoc} */
-    @Override
-    public String getMultipleItemsTooltip(final int numberOfItems) {
-        return Messages.FindBugs_ResultAction_MultipleWarnings(numberOfItems);
-    }
-
-    /** {@inheritDoc} */
-    @Override
-    public String getSingleItemTooltip() {
-        return Messages.FindBugs_ResultAction_OneWarning();
     }
 }

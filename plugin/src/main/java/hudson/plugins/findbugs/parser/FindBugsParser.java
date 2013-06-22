@@ -1,11 +1,5 @@
 package hudson.plugins.findbugs.parser; // NOPMD
 
-import hudson.plugins.analysis.core.AnnotationParser;
-import hudson.plugins.analysis.util.model.FileAnnotation;
-import hudson.plugins.analysis.util.model.LineRange;
-import hudson.plugins.analysis.util.model.Priority;
-import hudson.plugins.findbugs.FindBugsMessages;
-
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -37,6 +31,13 @@ import edu.umd.cs.findbugs.ba.SourceFile;
 import edu.umd.cs.findbugs.ba.SourceFinder;
 import edu.umd.cs.findbugs.cloud.Cloud;
 
+import hudson.plugins.analysis.core.AnnotationParser;
+import hudson.plugins.analysis.util.TreeStringBuilder;
+import hudson.plugins.analysis.util.model.FileAnnotation;
+import hudson.plugins.analysis.util.model.LineRange;
+import hudson.plugins.analysis.util.model.Priority;
+import hudson.plugins.findbugs.FindBugsMessages;
+
 /**
  * A parser for the native FindBugs XML files (ant task, batch file or
  * maven-findbugs-plugin >= 1.2).
@@ -53,6 +54,7 @@ public class FindBugsParser implements AnnotationParser {
 
     private static final String DOT = ".";
     private static final String SLASH = "/";
+    private static final String CLOUD_DETAILS_URL_PROPERTY = "detailsUrl";
 
     private static final int DAY_IN_MSEC = 1000 * 60 * 60 * 24;
     private static final int HIGH_PRIORITY_LOWEST_RANK = 4;
@@ -133,14 +135,28 @@ public class FindBugsParser implements AnnotationParser {
      */
     public Collection<FileAnnotation> parse(final File file, final Collection<String> sources, final String moduleName)
             throws IOException, DocumentException, SAXException {
-        FileInputStream input = null;
+        return parse(new InputStreamProvider() {
+            public InputStream getInputStream() throws IOException {
+                return new FileInputStream(file);
+            }
+        }, sources, moduleName);
+    }
+
+    Collection<FileAnnotation> parse(final InputStreamProvider file, final Collection<String> sources, final String moduleName)
+            throws IOException, DocumentException, SAXException {
+        InputStream input = null;
         try {
-            input = new FileInputStream(file);
-            Map<String, String> hashToMessageMapping = createHashToMessageMapping(input);
+            input = file.getInputStream();
+            Map<String, String> hashToMessageMapping = new HashMap<String, String>();
+            Map<String, String> categories = new HashMap<String, String>();
+            for (XmlBugInstance bug : preparse(input)) {
+                hashToMessageMapping.put(bug.getInstanceHash(), bug.getMessage());
+                categories.put(bug.getType(), bug.getCategory());
+            }
             IOUtils.closeQuietly(input);
 
-            input = new FileInputStream(file);
-            return parse(input, sources, moduleName, hashToMessageMapping);
+            input = file.getInputStream();
+            return parse(input, sources, moduleName, hashToMessageMapping, categories);
         }
         finally {
             IOUtils.closeQuietly(input);
@@ -148,8 +164,10 @@ public class FindBugsParser implements AnnotationParser {
     }
 
     /**
-     * Creates a mapping of FindBugs warnings to messages. A bug is represented
-     * by its unique hash code.
+     * Pre-parses a file for some information not available from the FindBugs parser.
+     * Creates a mapping of FindBugs warnings to messages.
+     * A bug is represented by its unique hash code.
+     * Also obtains original categories for bug types.
      *
      * @param file
      *            the FindBugs XML file
@@ -159,7 +177,7 @@ public class FindBugsParser implements AnnotationParser {
      * @throws IOException
      *             signals that an I/O exception has occurred.
      */
-    public Map<String, String> createHashToMessageMapping(final InputStream file) throws SAXException, IOException {
+    List<XmlBugInstance> preparse(final InputStream file) throws SAXException, IOException {
         Digester digester = new Digester();
         digester.setValidating(false);
         digester.setClassLoader(FindBugsParser.class.getClassLoader());
@@ -176,11 +194,7 @@ public class FindBugsParser implements AnnotationParser {
         digester.push(bugs);
         digester.parse(file);
 
-        HashMap<String, String> mapping = new HashMap<String, String>();
-        for (XmlBugInstance bug : bugs) {
-            mapping.put(bug.getInstanceHash(), bug.getMessage());
-        }
-        return mapping;
+        return bugs;
     }
 
     /**
@@ -195,14 +209,15 @@ public class FindBugsParser implements AnnotationParser {
      *            name of maven module
      * @param hashToMessageMapping
      *            mapping of hash codes to messages
+     * @param categories mapping from bug types to their categories
      * @return the parsed result (stored in the module instance)
      * @throws IOException
      *             if the file could not be parsed
      * @throws DocumentException in case of a parser exception
      */
-    public Collection<FileAnnotation> parse(final InputStream file, final Collection<String> sources,
-            final String moduleName, final Map<String, String> hashToMessageMapping) throws IOException,
-            DocumentException {
+    private Collection<FileAnnotation> parse(final InputStream file, final Collection<String> sources,
+            final String moduleName, final Map<String, String> hashToMessageMapping, final Map<String, String> categories)
+                    throws IOException, DocumentException {
         SortedBugCollection collection = readXml(file);
 
         Project project = collection.getProject();
@@ -213,19 +228,23 @@ public class FindBugsParser implements AnnotationParser {
         SourceFinder sourceFinder = new SourceFinder(project);
         String actualName = extractModuleName(moduleName, project);
 
-        ArrayList<FileAnnotation> annotations = new ArrayList<FileAnnotation>();
+        TreeStringBuilder stringPool = new TreeStringBuilder();
+        List<FileAnnotation> annotations = new ArrayList<FileAnnotation>();
         Collection<BugInstance> bugs = collection.getCollection();
         for (BugInstance warning : bugs) {
             SourceLineAnnotation sourceLine = warning.getPrimarySourceLineAnnotation();
 
             String message = warning.getMessage();
+            String type = warning.getType();
             if (message.contains("TEST: Unknown")) {
-                message = FindBugsMessages.getInstance().getShortMessage(warning.getType(), LocaleProvider.getLocale());
+                message = FindBugsMessages.getInstance().getShortMessage(type, LocaleProvider.getLocale());
+            }
+            String category = categories.get(type);
+            if (category == null) { // alternately, only if warning.getBugPattern().getType().equals("UNKNOWN")
+                category = warning.getBugPattern().getCategory();
             }
             Bug bug = new Bug(getPriority(warning),
-                    StringUtils.defaultIfEmpty(hashToMessageMapping.get(warning.getInstanceHash()), message),
-                    warning.getBugPattern().getCategory(),
-                    warning.getType(), sourceLine.getStartLine(), sourceLine.getEndLine());
+                    StringUtils.defaultIfEmpty(hashToMessageMapping.get(warning.getInstanceHash()), message), category, type, sourceLine.getStartLine(), sourceLine.getEndLine());
             bug.setInstanceHash(warning.getInstanceHash());
             bug.setRank(warning.getBugRank());
 
@@ -238,6 +257,7 @@ public class FindBugsParser implements AnnotationParser {
                 setAffectedLines(warning, bug);
 
                 annotations.add(bug);
+                bug.intern(stringPool);
             }
         }
         return annotations;
@@ -282,13 +302,16 @@ public class FindBugsParser implements AnnotationParser {
     @edu.umd.cs.findbugs.annotations.SuppressWarnings("NP")
     private boolean setCloudInformation(final SortedBugCollection collection, final BugInstance warning, final Bug bug) {
         Cloud cloud = collection.getCloud();
+        cloud.waitUntilIssueDataDownloaded();
+
         bug.setShouldBeInCloud(cloud.isOnlineCloud());
-        // FIXME: This method has been removed in findbugs 2.0.0
-        // bug.setDetailsUrlTemplate(cloud.getBugDetailsUrlTemplate());
+        Map<String, String> cloudDetails = collection.getXmlCloudDetails();
+        bug.setDetailsUrlTemplate(cloudDetails.get(CLOUD_DETAILS_URL_PROPERTY));
+
         long firstSeen = cloud.getFirstSeen(warning);
         bug.setInCloud(cloud.isInCloud(warning));
         bug.setFirstSeen(firstSeen);
-        int ageInDays = (int) ((collection.getAnalysisTimestamp() - firstSeen) / DAY_IN_MSEC);
+        int ageInDays = (int)((collection.getAnalysisTimestamp() - firstSeen) / DAY_IN_MSEC);
         bug.setAgeInDays(ageInDays);
         bug.setReviewCount(cloud.getNumberReviewers(warning));
 
@@ -372,6 +395,13 @@ public class FindBugsParser implements AnnotationParser {
         else {
             return project.getProjectName();
         }
+    }
+
+    /**
+     * Provides an input stream for the parser.
+     */
+    interface InputStreamProvider {
+        InputStream getInputStream() throws IOException;
     }
 }
 

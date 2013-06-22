@@ -4,14 +4,14 @@
   <parent>
     <groupId>org.jvnet.hudson.plugins</groupId>
     <artifactId>analysis-pom</artifactId>
-    <version>1.33</version>
+    <version>1.42</version>
     <relativePath>../../analysis-pom/pom.xml</relativePath>
   </parent>
 
   <artifactId>findbugs</artifactId>
   <packaging>hpi</packaging>
   <name>FindBugs Plug-in</name>
-  <version>4.34-SNAPSHOT</version>
+  <version>4.49-SNAPSHOT</version>
   <url>http://wiki.jenkins-ci.org/x/GYAs</url>
   <description>This plug-in generates the trend report for FindBugs,
     an open source program which uses static analysis to look for bugs
@@ -31,6 +31,10 @@
       <comments>FindBugs messages.xml file from the findbugs-contrib project.</comments>
     </license>
     <license>
+      <name>GNU LESSER GENERAL PUBLIC LICENSE</name>
+      <comments>FindBugs messages.xml file from the find-sec-bugs project.</comments>
+    </license>
+    <license>
       <comments>The findbugs logo is a trademark by The University of
         Maryland. These icons are a courtesy of the FindBugs team.</comments>
     </license>
@@ -40,18 +44,18 @@
     <dependency>
       <groupId>org.jvnet.hudson.plugins</groupId>
       <artifactId>analysis-core</artifactId>
-      <version>1.36</version>
+      <version>1.49</version>
     </dependency>
     <dependency>
       <groupId>org.jvnet.hudson.plugins</groupId>
       <artifactId>analysis-test</artifactId>
-      <version>1.7</version>
+      <version>1.9</version>
       <scope>test</scope>
     </dependency>
     <dependency>
         <groupId>org.jvnet.hudson.plugins.findbugs</groupId>
         <artifactId>library</artifactId>
-        <version>2.0.0</version>
+        <version>2.0.1</version>
     </dependency>
     <dependency>
       <groupId>xerces</groupId>
@@ -68,9 +72,16 @@
 
   <repositories>
     <repository>
-      <id>maven.jenkins-ci.org</id>
-      <url>http://maven.jenkins-ci.org:8081/content/repositories/releases/</url>
+      <id>repo.jenkins-ci.org</id>
+      <url>http://repo.jenkins-ci.org/public/</url>
     </repository>
   </repositories>
+
+  <pluginRepositories>
+    <pluginRepository>
+      <id>repo.jenkins-ci.org</id>
+      <url>http://repo.jenkins-ci.org/public/</url>
+    </pluginRepository>
+  </pluginRepositories>
 
 </project>

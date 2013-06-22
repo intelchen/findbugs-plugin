@@ -1,26 +1,32 @@
 package hudson.plugins.findbugs;
 
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+import org.apache.commons.lang.StringUtils;
+import org.apache.maven.project.MavenProject;
+import org.codehaus.plexus.component.configurator.ComponentConfigurationException;
+import org.codehaus.plexus.configuration.xml.XmlPlexusConfiguration;
+import org.kohsuke.stapler.DataBoundConstructor;
+
+import hudson.FilePath;
 import hudson.maven.MavenAggregatedReport;
 import hudson.maven.MavenBuildProxy;
 import hudson.maven.MojoInfo;
 import hudson.maven.MavenBuild;
 import hudson.maven.MavenModule;
+
 import hudson.model.BuildListener;
+
 import hudson.plugins.analysis.core.FilesParser;
 import hudson.plugins.analysis.core.HealthAwareReporter;
 import hudson.plugins.analysis.core.ParserResult;
 import hudson.plugins.analysis.util.PluginLogger;
 import hudson.plugins.findbugs.parser.FindBugsParser;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-
-import org.apache.maven.project.MavenProject;
-import org.codehaus.plexus.component.configurator.ComponentConfigurationException;
-import org.codehaus.plexus.configuration.xml.XmlPlexusConfiguration;
-import org.kohsuke.stapler.DataBoundConstructor;
+import hudson.remoting.VirtualChannel;
 
 /**
  * Publishes the results of the FindBugs analysis (maven 2 project type).
@@ -91,9 +97,14 @@ public class FindBugsReporter extends HealthAwareReporter<FindBugsResult> {
      *            annotation threshold
      * @param canRunOnFailed
      *            determines whether the plug-in can run for failed builds, too
+     * @param useStableBuildAsReference
+     *            determines whether only stable builds should be used as reference builds or not
      * @param isRankActivated
      *            determines whether to use the rank when evaluation the
      *            priority
+     * @param canComputeNew
+     *            determines whether new warnings should be computed (with
+     *            respect to baseline)
      */
     // CHECKSTYLE:OFF
     @SuppressWarnings("PMD.ExcessiveParameterList")
@@ -103,13 +114,13 @@ public class FindBugsReporter extends HealthAwareReporter<FindBugsResult> {
             final String unstableNewAll, final String unstableNewHigh, final String unstableNewNormal, final String unstableNewLow,
             final String failedTotalAll, final String failedTotalHigh, final String failedTotalNormal, final String failedTotalLow,
             final String failedNewAll, final String failedNewHigh, final String failedNewNormal, final String failedNewLow,
-            final boolean canRunOnFailed, final boolean isRankActivated, final boolean canComputeNew) {
+            final boolean canRunOnFailed, final boolean useStableBuildAsReference, final boolean isRankActivated, final boolean canComputeNew) {
         super(healthy, unHealthy, thresholdLimit, useDeltaValues,
                 unstableTotalAll, unstableTotalHigh, unstableTotalNormal, unstableTotalLow,
                 unstableNewAll, unstableNewHigh, unstableNewNormal, unstableNewLow,
                 failedTotalAll, failedTotalHigh, failedTotalNormal, failedTotalLow,
                 failedNewAll, failedNewHigh, failedNewNormal, failedNewLow,
-                canRunOnFailed, canComputeNew, PLUGIN_NAME);
+                canRunOnFailed, useStableBuildAsReference, canComputeNew, PLUGIN_NAME);
         this.isRankActivated = isRankActivated;
     }
     // CHECKSTYLE:ON
@@ -125,7 +136,6 @@ public class FindBugsReporter extends HealthAwareReporter<FindBugsResult> {
         return isRankActivated;
     }
 
-    /** {@inheritDoc} */
     @Override
     public boolean preExecute(final MavenBuildProxy build, final MavenProject pom, final MojoInfo mojo,
             final BuildListener listener) throws InterruptedException, IOException {
@@ -166,12 +176,25 @@ public class FindBugsReporter extends HealthAwareReporter<FindBugsResult> {
         FilesParser findBugsCollector = new FilesParser(PLUGIN_NAME, determineFileName(mojo),
                 new FindBugsParser(sources, isRankActivated), getModuleName(pom));
 
-        return getTargetPath(pom).act(findBugsCollector);
+        return getOutputPath(mojo, pom).act(findBugsCollector);
+    }
+
+    private FilePath getOutputPath(final MojoInfo mojo, final MavenProject pom) {
+        try {
+            String configurationValue = mojo.getConfigurationValue("findbugsXmlOutputDirectory", String.class);
+            if (StringUtils.isNotBlank(configurationValue)) {
+                return new FilePath((VirtualChannel)null, configurationValue);
+            }
+        }
+        catch (ComponentConfigurationException exception) {
+            // ignore and use fall back value
+        }
+        return getTargetPath(pom);
     }
 
     @Override
     protected FindBugsResult createResult(final MavenBuild build, final ParserResult project) {
-        return new FindBugsReporterResult(build, getDefaultEncoding(), project);
+        return new FindBugsReporterResult(build, getDefaultEncoding(), project, useOnlyStableBuildsAsReference());
     }
 
     @Override
@@ -182,21 +205,25 @@ public class FindBugsReporter extends HealthAwareReporter<FindBugsResult> {
     /**
      * Determines the filename of the FindBugs results.
      *
-     * @param mojo the mojo containing the FindBugs configuration
+     * @param mojo
+     *            the mojo containing the FindBugs configuration
      * @return filename of the FindBugs results
      */
     private String determineFileName(final MojoInfo mojo) {
-        String fileName = FINDBUGS_XML_FILE;
         try {
+            if (FindBugsPlugin.isFindBugs2x(mojo.mojoExecution)) {
+                return FINDBUGS_XML_FILE;
+            }
+
             Boolean isNativeFormat = mojo.getConfigurationValue("findbugsXmlOutput", Boolean.class);
             if (Boolean.FALSE.equals(isNativeFormat)) {
-                fileName = MAVEN_FINDBUGS_XML_FILE;
+                return MAVEN_FINDBUGS_XML_FILE;
             }
         }
         catch (ComponentConfigurationException exception) {
-            // ignore and assume new format
+            // return new format
         }
-        return fileName;
+        return FINDBUGS_XML_FILE;
     }
 
     @Override
@@ -210,7 +237,7 @@ public class FindBugsReporter extends HealthAwareReporter<FindBugsResult> {
     }
 
     /** Ant file-set pattern of files to work with. @deprecated */
-    @SuppressWarnings("unused")
+    @SuppressWarnings("PMD")
     @edu.umd.cs.findbugs.annotations.SuppressWarnings("SE")
     @Deprecated
     private transient String pattern; // obsolete since release 2.5
