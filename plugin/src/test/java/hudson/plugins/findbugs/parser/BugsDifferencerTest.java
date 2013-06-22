@@ -1,6 +1,6 @@
 package hudson.plugins.findbugs.parser;
 
-import static junit.framework.Assert.*;
+import static org.junit.Assert.*;
 import hudson.plugins.analysis.core.AnnotationDifferencer;
 import hudson.plugins.analysis.test.AnnotationDifferencerTest;
 import hudson.plugins.analysis.util.model.AnnotationStream;
@@ -21,7 +21,6 @@ import com.google.common.collect.Sets;
  * Tests the {@link AnnotationDifferencer} for bugs.
  */
 public class BugsDifferencerTest extends AnnotationDifferencerTest {
-    /** {@inheritDoc} */
     @Override
     public FileAnnotation createAnnotation(final String fileName, final Priority priority, final String message, final String category,
             final String type, final int start, final int end) {
